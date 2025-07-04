@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
 interface QrScannerProps {
-  onScan: (data: string) => void;
+  onScan: (data: Uint8Array) => void;
   className?: string;
 }
 
@@ -35,8 +35,8 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
               inversionAttempts: "attemptBoth",
             });
 
-            if (code && code.data) {
-              onScan(code.data);
+            if (code) {
+              onScan(new Uint8Array(code.binaryData));
               setIsScanning(false);
               return; 
             }

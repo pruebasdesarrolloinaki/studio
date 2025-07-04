@@ -9,28 +9,27 @@ import { useToast } from "@/hooks/use-toast";
 import { Copy, Check, Binary } from "lucide-react";
 
 export default function Home() {
-  const [scannedData, setScannedData] = useState<string | null>(null);
+  const [scannedData, setScannedData] = useState<Uint8Array | null>(null);
   const [isCopied, setIsCopied] = useState(false);
   const { toast } = useToast();
 
-  const handleScan = (data: string) => {
+  const handleScan = (data: Uint8Array) => {
     setScannedData(data);
   };
 
   const byteArrayString = useMemo(() => {
     if (!scannedData) return "";
     try {
-      const encoder = new TextEncoder();
-      const byteArray = encoder.encode(scannedData);
-      return `[${byteArray.join(", ")}]`;
+      // The data is already a Uint8Array, we just need to format it for display.
+      return `[${Array.from(scannedData).join(", ")}]`;
     } catch (error) {
-      console.error("Error converting to byte array:", error);
+      console.error("Error converting to byte array string:", error);
       toast({
         variant: "destructive",
         title: "Conversion Error",
-        description: "Could not convert scanned data to a byte array.",
+        description: "Could not display byte array from scanned data.",
       });
-      return "Error: Could not convert data.";
+      return "Error: Could not display data.";
     }
   }, [scannedData, toast]);
 
@@ -79,7 +78,7 @@ export default function Home() {
                 </Button>
               </CardTitle>
               <CardDescription>
-                The UTF-8 byte representation of the scanned QR code data.
+                The raw byte representation of the scanned QR code data.
               </CardDescription>
             </CardHeader>
             <CardContent>
