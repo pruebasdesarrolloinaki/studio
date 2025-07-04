@@ -1,0 +1,16 @@
+{
+  "name": "ByteScan",
+  "short_name": "ByteScan",
+  "description": "Scan QR codes and convert data to byte arrays.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#222222",
+  "theme_color": "#222222",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
