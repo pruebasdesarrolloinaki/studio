@@ -6,8 +6,19 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Copy, Check, Binary, FileText } from "lucide-react";
+import { Copy, Check, Binary, FileText, UserSquare } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+interface DecodedPayload {
+  documentNumber?: string;
+  dateOfBirth?: string;
+  name?: string;
+  surnames?: string;
+  sex?: string;
+  expiryDate?: string;
+  thumbnailInfo?: string;
+  unknown?: Array<{ tag: string; length: number; value: string }>;
+}
 
 interface DecodedQrData {
   header: {
@@ -24,11 +35,7 @@ interface DecodedQrData {
     docType: number;
     docCategory: number;
   };
-  tlvData: Array<{
-    tag: number;
-    length: number;
-    value: string;
-  }>;
+  payload: DecodedPayload;
   signature?: {
     tag: number;
     length: number;
@@ -94,46 +101,63 @@ export default function Home() {
         docCategory
       };
       
-      const tlvData: Array<{ tag: number; length: number; value: string }> = [];
-      let signature;
-      
-      while (offset < data.length) {
-        const tag = data[offset++];
-        
-        if (offset >= data.length) break;
+      const textDecoder = new TextDecoder('utf-8');
+      const allTlvItems: Array<{ tag: number; length: number; value: Uint8Array }> = [];
 
-        let length = 0;
-        const firstLengthByte = data[offset++];
-        if (firstLengthByte < 0x80) {
-          length = firstLengthByte;
-        } else {
-          const numLengthBytes = firstLengthByte & 0x7F;
-          if (offset + numLengthBytes > data.length) break;
-          length = 0;
-          for (let i = 0; i < numLengthBytes; i++) {
-            length = (length << 8) | data[offset++];
+      while (offset < data.length) {
+          const tag = data[offset++];
+          if (offset >= data.length) break;
+
+          let length = 0;
+          const firstLengthByte = data[offset++];
+          if (firstLengthByte < 0x80) {
+              length = firstLengthByte;
+          } else {
+              const numLengthBytes = firstLengthByte & 0x7F;
+              if (offset + numLengthBytes > data.length) break;
+              for (let i = 0; i < numLengthBytes; i++) {
+                  length = (length << 8) | data[offset++];
+              }
           }
-        }
-        
-        if (offset + length > data.length) break;
-        
-        const valueBytes = data.slice(offset, offset + length);
-        offset += length;
-        
-        const valueHex = Array.from(valueBytes)
-          .map(byte => byte.toString(16).padStart(2, '0').toUpperCase())
-          .join('');
-        
-        if (offset >= data.length) {
-          signature = { tag, length, value: valueHex };
-        } else {
-          tlvData.push({ tag, length, value: valueHex });
-        }
+
+          if (offset + length > data.length) break;
+
+          const valueBytes = data.slice(offset, offset + length);
+          allTlvItems.push({ tag, length, value: valueBytes });
+          offset += length;
       }
+
+      const payload: DecodedPayload = {};
+      let signature;
+
+      if (allTlvItems.length > 0) {
+          const signatureItem = allTlvItems.pop()!;
+          const valueHex = Array.from(signatureItem.value)
+              .map(byte => byte.toString(16).padStart(2, '0').toUpperCase())
+              .join('');
+          signature = { tag: signatureItem.tag, length: signatureItem.length, value: valueHex };
+      }
+
+      allTlvItems.forEach(item => {
+          switch (item.tag) {
+              case 0x40: payload.documentNumber = textDecoder.decode(item.value); break;
+              case 0x42: payload.dateOfBirth = textDecoder.decode(item.value); break;
+              case 0x44: payload.name = textDecoder.decode(item.value); break;
+              case 0x46: payload.surnames = textDecoder.decode(item.value); break;
+              case 0x48: payload.sex = textDecoder.decode(item.value); break;
+              case 0x4c: payload.expiryDate = textDecoder.decode(item.value); break;
+              case 0x50: payload.thumbnailInfo = `JPEG2000 Image (${item.length} bytes)`; break;
+              default:
+                  const valueHex = Array.from(item.value).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join('');
+                  if (!payload.unknown) payload.unknown = [];
+                  payload.unknown.push({ tag: `0x${item.tag.toString(16)}`, length: item.length, value: valueHex });
+                  break;
+          }
+      });
       
       return {
         header,
-        tlvData,
+        payload,
         signature,
         rawBytes: data
       };
@@ -173,8 +197,8 @@ export default function Home() {
       setDecodedData(null);
       toast({
         variant: "default",
-        title: "Mostrando bytes sin decodificar",
-        description: "Los datos no siguen el formato ICAO 9303 SDV esperado, pero puedes ver los bytes crudos.",
+        title: "Showing raw bytes",
+        description: "Data does not follow expected format, but you can see the raw bytes.",
       });
     }
   };
@@ -310,56 +334,46 @@ export default function Home() {
                   </Button>
                   <Textarea
                     readOnly
-                    value={decodedDataString}
+                    value={decodedData ? decodedDataString : "Scan a QR code to see the decoded structure here..."}
                     placeholder="Scan a QR code to see the decoded structure here..."
                     className="font-code h-64 resize-none bg-muted/20 pr-10"
                   />
                   {decodedData && (
-                    <div className="mt-4 text-sm">
-                      <div className="flex items-center gap-2 text-primary font-semibold">
-                        <FileText className="w-4 h-4" />
-                        <span>Información del Sello Digital</span>
+                    <div className="mt-4 text-sm space-y-4">
+                      <div>
+                        <div className="flex items-center gap-2 text-primary font-semibold mb-2">
+                          <FileText className="w-4 h-4" />
+                          <span>Información del Sello Digital (Cabecera)</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                          <div><span className="text-muted-foreground">Magic:</span> <code>0x{decodedData.header.magicConstant.toString(16).toUpperCase()}</code></div>
+                          <div><span className="text-muted-foreground">Versión:</span> <code>{decodedData.header.version}</code></div>
+                          <div><span className="text-muted-foreground">País Emisor:</span> <code>{decodedData.header.country}</code></div>
+                          <div><span className="text-muted-foreground">ID Firmante:</span> <code>{`${decodedData.header.signerId.country}${decodedData.header.signerId.entity}`}</code></div>
+                          <div className="col-span-2"><span className="text-muted-foreground">Ref. Certificado:</span> <code className="break-all text-xs">{decodedData.header.signerId.certRef}</code></div>
+                          <div><span className="text-muted-foreground">Fecha Emisión:</span> <code>{decodedData.header.issueDate}</code></div>
+                          <div><span className="text-muted-foreground">Fecha Firma:</span> <code>{decodedData.header.signDate}</code></div>
+                          <div><span className="text-muted-foreground">Tipo Doc:</span> <code>{decodedData.header.docType}</code></div>
+                          <div><span className="text-muted-foreground">Categoría Doc:</span> <code>{decodedData.header.docCategory}</code></div>
+                        </div>
                       </div>
-                      <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2">
-                        <div>
-                          <span className="text-muted-foreground">Magic Constant:</span>{" "}
-                          <code>0x{decodedData.header.magicConstant.toString(16).toUpperCase()}</code>
+
+                      <div>
+                        <div className="flex items-center gap-2 text-primary font-semibold mb-2">
+                          <UserSquare className="w-4 h-4" />
+                          <span>Contenido del Documento (Payload)</span>
                         </div>
-                        <div>
-                          <span className="text-muted-foreground">Versión:</span>{" "}
-                          <code>{decodedData.header.version === 0x03 ? "4" : decodedData.header.version}</code>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">País:</span>{" "}
-                          <code>{decodedData.header.country}</code>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">ID Firmante:</span>{" "}
-                          <code>{`${decodedData.header.signerId.country}${decodedData.header.signerId.entity}`}</code>
-                        </div>
-                        <div className="col-span-2">
-                          <span className="text-muted-foreground">Ref. Certificado:</span>{" "}
-                          <code className="break-all text-xs">{decodedData.header.signerId.certRef}</code>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Fecha Emisión:</span>{" "}
-                          <code>{decodedData.header.issueDate}</code>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Fecha Firma:</span>{" "}
-                          <code>{decodedData.header.signDate}</code>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Tipo Documento:</span>{" "}
-                          <code>{decodedData.header.docType}</code>
-                          {decodedData.header.docType === 7 && <span className="text-xs ml-1">(Verificación simple)</span>}
-                          {decodedData.header.docType === 8 && <span className="text-xs ml-1">(Verificación completa)</span>}
-                          {decodedData.header.docType === 9 && <span className="text-xs ml-1">(Verificación de edad)</span>}
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Categoría:</span>{" "}
-                          <code>{decodedData.header.docCategory}</code>
-                          {decodedData.header.docCategory === 9 && <span className="text-xs ml-1">(DNI en el móvil)</span>}
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                          {decodedData.payload.documentNumber && <div><span className="text-muted-foreground">Nº Documento:</span> <code>{decodedData.payload.documentNumber}</code></div>}
+                          {decodedData.payload.name && <div><span className="text-muted-foreground">Nombre:</span> <code>{decodedData.payload.name}</code></div>}
+                          {decodedData.payload.surnames && <div className="col-span-2"><span className="text-muted-foreground">Apellidos:</span> <code>{decodedData.payload.surnames}</code></div>}
+                          {decodedData.payload.dateOfBirth && <div><span className="text-muted-foreground">Nacimiento:</span> <code>{decodedData.payload.dateOfBirth}</code></div>}
+                          {decodedData.payload.expiryDate && <div><span className="text-muted-foreground">Caducidad:</span> <code>{decodedData.payload.expiryDate}</code></div>}
+                          {decodedData.payload.sex && <div><span className="text-muted-foreground">Sexo:</span> <code>{decodedData.payload.sex}</code></div>}
+                          {decodedData.payload.thumbnailInfo && <div className="col-span-2"><span className="text-muted-foreground">Imagen:</span> <code>{decodedData.payload.thumbnailInfo}</code></div>}
+                          {decodedData.payload.unknown?.map((item, index) => (
+                             <div key={index} className="col-span-2"><span className="text-muted-foreground">Campo desc. ({item.tag}):</span> <code className="break-all text-xs">{item.value}</code></div>
+                          ))}
                         </div>
                       </div>
                     </div>
@@ -413,12 +427,11 @@ export default function Home() {
                             <div>
                               <span className="text-muted-foreground">Primer byte (Magic):</span>{" "}
                               <code>0x{scannedData[0]?.toString(16).toUpperCase().padStart(2, '0') || "??"}</code>
-                              {scannedData[0] === 0x40 && <span className="text-xs ml-1">(0x40)</span>}
-                              {scannedData[0] === 0xDC && <span className="text-xs ml-1">(0xDC - ICAO 9303)</span>}
+                              {scannedData[0] === 0xDC && <span className="text-xs ml-1">(ICAO 9303)</span>}
                             </div>
                             <div>
-                              <span className="text-muted-foreground">Segundo byte (Version):</span>{" "}
-                              <code>0x{scannedData[1]?.toString(16).toUpperCase().padStart(2, '0') || "??"}</code>
+                              <span className="text-muted-foreground">Versión:</span>{" "}
+                              <code>{scannedData[1] ?? "??"}</code>
                             </div>
                             <div>
                               <span className="text-muted-foreground">Tamaño total:</span>{" "}
@@ -427,9 +440,7 @@ export default function Home() {
                             <div>
                               <span className="text-muted-foreground">Posible formato:</span>{" "}
                               <code>
-                                {scannedData[0] === 0xDC ? "ICAO 9303 SDV" : 
-                                 scannedData[0] === 0x40 ? "Formato alternativo (0x40)" : 
-                                 "Desconocido"}
+                                {scannedData[0] === 0xDC ? "ICAO 9303 SDV" : "Desconocido"}
                               </code>
                             </div>
                           </div>
