@@ -31,11 +31,9 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
           canvasContext.drawImage(video, 0, 0, canvas.width, canvas.height);
           try {
             const imageData = canvasContext.getImageData(0, 0, canvas.width, canvas.height);
-            const code = jsQR(imageData.data, imageData.width, imageData.height, {
-              inversionAttempts: "attemptBoth",
-            });
+            // Reverted to basic jsQR call for debugging non-standard content
+            const code = jsQR(imageData.data, imageData.width, imageData.height);
 
-            // Ensure a QR code with actual data was found before stopping the scan
             if (code && code.binaryData.length > 0) {
               onScan(new Uint8Array(code.binaryData));
               setIsScanning(false);
@@ -53,15 +51,10 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
   const startScanProcess = useCallback(async () => {
     setError(null);
     try {
-      // Request higher resolution to improve detection of dense QR codes
-      const constraints = {
-        video: {
-          facingMode: "environment",
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-      };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      // Using basic camera constraints for debugging
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+      });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.setAttribute("playsinline", "true");
@@ -69,22 +62,8 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
         setIsScanning(true);
       }
     } catch (err) {
-      console.error("Error accessing camera with high resolution, falling back: ", err);
-      // Fallback to default if high resolution fails
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
-        });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.setAttribute("playsinline", "true");
-          await videoRef.current.play();
-          setIsScanning(true);
-        }
-      } catch (fallbackErr) {
-        console.error("Fallback camera access failed: ", fallbackErr);
-        setError("Could not access camera. Please grant permission and try again.");
-      }
+      console.error("Camera access failed: ", err);
+      setError("Could not access camera. Please grant permission and try again.");
     }
   }, []);
 
