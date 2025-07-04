@@ -41,52 +41,28 @@ interface DecodedQrData {
   rawBytes: Uint8Array;
 }
 
-const C40_BASIC_SET = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const decodeText = (bytes: Uint8Array): string => {
+  try {
+    return new TextDecoder('utf-8').decode(bytes);
+  } catch (e) {
+    // Fallback for non-utf8 data, though it should be UTF-8
+    return Array.from(bytes).map(b => String.fromCharCode(b)).join('');
+  }
+};
 
-function decodeC40(bytes: Uint8Array): string {
-    let result = '';
-    // C40 encodes 3 characters into a 16-bit word.
-    for (let i = 0; i < bytes.length; i += 2) {
-        if (i + 1 >= bytes.length) {
-            console.warn("C40: Odd number of bytes found, skipping final byte.");
-            break;
-        }
-
-        const word = (bytes[i] << 8) | bytes[i + 1];
-        
-        const val1 = Math.floor(word / 1600);
-        const rem = word % 1600;
-        const val2 = Math.floor(rem / 40);
-        const val3 = rem % 40;
-
-        for (const v of [val1, val2, val3]) {
-            if (v <= 2) {
-                // This is a shift character. A full implementation would handle different character sets.
-                // For names and document numbers, we expect the basic set.
-            } else if (v >= 3 && v < 3 + C40_BASIC_SET.length) {
-                result += C40_BASIC_SET[v - 3];
-            } else {
-                result += '?'; // Character not in basic set
-            }
-        }
-    }
-    return result.trimEnd(); // Remove padding spaces
-}
-
-
-function decodeDateTLV(bytes: Uint8Array): string {
-    if (bytes.length !== 3) return "Invalid Date Bytes";
-    
-    // As per ICAO 9303-13, a date is MMDDYYYY encoded as a 3-byte integer.
-    const dateInt = (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];
-    const dateStr = dateInt.toString().padStart(8, '0');
-    
-    const month = dateStr.substring(0, 2);
-    const day = dateStr.substring(2, 4);
-    const year = dateStr.substring(4, 8);
-
+const decodeDate = (bytes: Uint8Array): string => {
+  try {
+    const dateStr = new TextDecoder('ascii').decode(bytes); // Should be 'YYYYMMDD'
+    if (dateStr.length !== 8) return "Invalid Date Format";
+    const year = dateStr.substring(0, 4);
+    const month = dateStr.substring(4, 6);
+    const day = dateStr.substring(6, 8);
     return `${year}-${month}-${day}`;
-}
+  } catch (e) {
+    return "Invalid Date Bytes";
+  }
+};
+
 
 export default function Home() {
   const [scannedData, setScannedData] = useState<Uint8Array | null>(null);
@@ -96,7 +72,7 @@ export default function Home() {
 
   const decodeQrData = (data: Uint8Array): DecodedQrData | null => {
     try {
-      // Per ICAO 9303-13 spec, header is fixed size
+      // Per ICAO 9303-13 spec, header is fixed size for many implementations
       const HEADER_SIZE = 18;
       if (data.length < HEADER_SIZE) {
         throw new Error("QR data too short for a valid ICAO 9303 header.");
@@ -176,12 +152,12 @@ export default function Home() {
       // Process the rest of the items as the message payload
       allTlvItems.forEach(item => {
           switch (item.tag) {
-              case 0x40: payload.documentNumber = decodeC40(item.value); break;
-              case 0x42: payload.dateOfBirth = decodeDateTLV(item.value); break;
-              case 0x44: payload.name = decodeC40(item.value); break;
-              case 0x46: payload.surnames = decodeC40(item.value); break;
-              case 0x48: payload.sex = decodeC40(item.value); break;
-              case 0x4c: payload.expiryDate = decodeDateTLV(item.value); break;
+              case 0x40: payload.documentNumber = decodeText(item.value); break;
+              case 0x42: payload.dateOfBirth = decodeDate(item.value); break;
+              case 0x44: payload.name = decodeText(item.value); break;
+              case 0x46: payload.surnames = decodeText(item.value); break;
+              case 0x48: payload.sex = decodeText(item.value); break;
+              case 0x4C: payload.expiryDate = decodeDate(item.value); break;
               case 0x50: payload.thumbnailInfo = `JPEG2000 Image (${item.length} bytes)`; break;
               default:
                   const valueHex = Array.from(item.value).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join('');
@@ -485,3 +461,5 @@ export default function Home() {
     </main>
   );
 }
+
+    
