@@ -41,6 +41,53 @@ interface DecodedQrData {
   rawBytes: Uint8Array;
 }
 
+const C40_BASIC_SET = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+function decodeC40(bytes: Uint8Array): string {
+    let result = '';
+    // C40 encodes 3 characters into a 16-bit word.
+    for (let i = 0; i < bytes.length; i += 2) {
+        if (i + 1 >= bytes.length) {
+            console.warn("C40: Odd number of bytes found, skipping final byte.");
+            break;
+        }
+
+        const word = (bytes[i] << 8) | bytes[i + 1];
+        
+        const val1 = Math.floor(word / 1600);
+        const rem = word % 1600;
+        const val2 = Math.floor(rem / 40);
+        const val3 = rem % 40;
+
+        for (const v of [val1, val2, val3]) {
+            if (v <= 2) {
+                // This is a shift character. A full implementation would handle different character sets.
+                // For names and document numbers, we expect the basic set.
+            } else if (v >= 3 && v < 3 + C40_BASIC_SET.length) {
+                result += C40_BASIC_SET[v - 3];
+            } else {
+                result += '?'; // Character not in basic set
+            }
+        }
+    }
+    return result.trimEnd(); // Remove padding spaces
+}
+
+
+function decodeDateTLV(bytes: Uint8Array): string {
+    if (bytes.length !== 3) return "Invalid Date Bytes";
+    
+    // As per ICAO 9303-13, a date is MMDDYYYY encoded as a 3-byte integer.
+    const dateInt = (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];
+    const dateStr = dateInt.toString().padStart(8, '0');
+    
+    const month = dateStr.substring(0, 2);
+    const day = dateStr.substring(2, 4);
+    const year = dateStr.substring(4, 8);
+
+    return `${year}-${month}-${day}`;
+}
+
 export default function Home() {
   const [scannedData, setScannedData] = useState<Uint8Array | null>(null);
   const [decodedData, setDecodedData] = useState<DecodedQrData | null>(null);
@@ -89,7 +136,6 @@ export default function Home() {
       };
       
       // --- TLV (Tag-Length-Value) PARSING ---
-      const textDecoder = new TextDecoder('utf-8');
       const allTlvItems: Array<{ tag: number; length: number; value: Uint8Array }> = [];
 
       while (offset < data.length) {
@@ -119,7 +165,7 @@ export default function Home() {
       let signature;
 
       // Per spec, the last TLV block is the signature
-      if (allTlvItems.length > 0) {
+      if (allTlvItems.length > 0 && allTlvItems[allTlvItems.length - 1].tag === 0xFF) {
           const signatureItem = allTlvItems.pop()!;
           const valueHex = Array.from(signatureItem.value)
               .map(byte => byte.toString(16).padStart(2, '0').toUpperCase())
@@ -130,12 +176,12 @@ export default function Home() {
       // Process the rest of the items as the message payload
       allTlvItems.forEach(item => {
           switch (item.tag) {
-              case 0x40: payload.documentNumber = textDecoder.decode(item.value); break;
-              case 0x42: payload.dateOfBirth = textDecoder.decode(item.value); break;
-              case 0x44: payload.name = textDecoder.decode(item.value); break;
-              case 0x46: payload.surnames = textDecoder.decode(item.value); break;
-              case 0x48: payload.sex = textDecoder.decode(item.value); break;
-              case 0x4c: payload.expiryDate = textDecoder.decode(item.value); break;
+              case 0x40: payload.documentNumber = decodeC40(item.value); break;
+              case 0x42: payload.dateOfBirth = decodeDateTLV(item.value); break;
+              case 0x44: payload.name = decodeC40(item.value); break;
+              case 0x46: payload.surnames = decodeC40(item.value); break;
+              case 0x48: payload.sex = decodeC40(item.value); break;
+              case 0x4c: payload.expiryDate = decodeDateTLV(item.value); break;
               case 0x50: payload.thumbnailInfo = `JPEG2000 Image (${item.length} bytes)`; break;
               default:
                   const valueHex = Array.from(item.value).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join('');
@@ -163,8 +209,10 @@ export default function Home() {
   };
   
   const formatDate = (bytes: Uint8Array): string => {
+    // This is for header dates, which might follow a different convention (e.g. YYMMDD from a base year)
     if (bytes.length !== 3) return "Invalid date";
     
+    // Assuming YYMMDD from year 2000 for header dates
     const year = 2000 + bytes[0]; 
     const month = bytes[1];
     const day = bytes[2];
