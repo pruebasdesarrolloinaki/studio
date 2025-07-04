@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { QrCode, VideoOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { useZxing } from "react-zxing";
+import { DecodeHintType, useZxing } from "react-zxing";
 
 interface QrScannerProps {
   onScan: (data: string) => void;
@@ -16,7 +16,11 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
   const [scanComplete, setScanComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
+  const hints = new Map();
+  hints.set(DecodeHintType.CHARACTER_SET, 'ISO-8859-1');
+
   const { ref, torch } = useZxing({
+    hints,
     onDecodeResult(result) {
       onScan(result.getText());
       setScanComplete(true);

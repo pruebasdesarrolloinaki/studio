@@ -41,70 +41,52 @@ export default function Home() {
 
   const decodeQrData = (data: Uint8Array): DecodedQrData | null => {
     try {
-      // Verificar longitud mínima para la cabecera
       if (data.length < 12) {
         throw new Error("QR data too short to be a valid ICAO 9303 SDV format");
       }
 
       let offset = 0;
       
-      // Leer Magic Constant (normalmente 0xDC, pero podría ser diferente)
       const magicConstant = data[offset++];
-      // No validamos estrictamente la constante mágica para permitir diferentes formatos
-      // Simplemente registramos el valor encontrado
       console.log(`Magic constant found: 0x${magicConstant.toString(16).toUpperCase()}`);
       
-      // Comprobar si estamos ante un formato conocido
       const isICAO9303 = magicConstant === 0xDC;
       const isAlternateFormat = magicConstant === 0x40;
       
       console.log(`Is ICAO 9303 format: ${isICAO9303}`);
       console.log(`Is alternate format (0x40): ${isAlternateFormat}`);
       
-      // Leer versión (normalmente 0x03 para versión 4, pero podría ser diferente)
       const version = data[offset++];
       console.log(`Version found: 0x${version.toString(16).toUpperCase()}`);
       
-      // Leer país expedidor ("ES")
       const countryCode = String.fromCharCode(data[offset++], data[offset++]);
       
-      // Leer identificador del firmante
-      // Formato: 2 letras país + 2 caracteres entidad + 2 dígitos tamaño + referencia certificado
       let signerIdStr = "";
       
-      // 2 letras país
       signerIdStr += String.fromCharCode(data[offset++], data[offset++]);
       
-      // 2 caracteres entidad
       signerIdStr += String.fromCharCode(data[offset++], data[offset++]);
       
-      // 2 dígitos tamaño
       const certRefSizeStr = String.fromCharCode(data[offset++], data[offset++]);
       const certRefSize = parseInt(certRefSizeStr, 10);
       signerIdStr += certRefSizeStr;
       
-      // Referencia certificado (cadena hexadecimal)
       let certRefHex = "";
       for (let i = 0; i < certRefSize; i++) {
         certRefHex += data[offset++].toString(16).padStart(2, '0').toUpperCase();
       }
       signerIdStr += certRefHex;
       
-      // Leer fecha de emisión (3 bytes)
       const issueDate = formatDate(data.slice(offset, offset + 3));
       offset += 3;
       
-      // Leer fecha de firma (3 bytes)
       const signDate = formatDate(data.slice(offset, offset + 3));
       offset += 3;
       
-      // Leer referencia a la definición de los elementos del documento
       const docType = data[offset++];
       
-      // Leer categoría de tipo de documento
       const docCategory = data[offset++];
       
-      // Crear objeto de cabecera
       const header = {
         magicConstant,
         version,
@@ -116,18 +98,14 @@ export default function Home() {
         docCategory
       };
       
-      // Procesar TLVs (Tag-Length-Value)
       const tlvData: Array<{ tag: number; length: number; value: string }> = [];
       let signature;
       
-      // Mientras haya datos por procesar
       while (offset < data.length) {
-        // Leer tag
         const tag = data[offset++];
         
-        // Leer longitud
         let length = 0;
-        if (version === 0x03) { // Versión 4 permite longitudes mayores a 254 bytes
+        if (version === 0x03) { 
           if (offset >= data.length) break;
           
           const firstLengthByte = data[offset++];
@@ -146,19 +124,15 @@ export default function Home() {
           length = data[offset++];
         }
         
-        // Verificar si hay suficientes bytes para el valor
         if (offset + length > data.length) break;
         
-        // Leer valor
         const valueBytes = data.slice(offset, offset + length);
         offset += length;
         
-        // Convertir a hexadecimal para visualización
         const valueHex = Array.from(valueBytes)
           .map(byte => byte.toString(16).padStart(2, '0').toUpperCase())
           .join('');
         
-        // Si es el último TLV, asumimos que es la firma
         if (offset >= data.length) {
           signature = { tag, length, value: valueHex };
         } else {
@@ -183,12 +157,10 @@ export default function Home() {
     }
   };
   
-  // Función auxiliar para formatear fechas desde 3 bytes
   const formatDate = (bytes: Uint8Array): string => {
     if (bytes.length !== 3) return "Invalid date";
     
-    // Formato: YYMMDD
-    const year = 2000 + bytes[0]; // Asumimos años 2000+
+    const year = 2000 + bytes[0]; 
     const month = bytes[1];
     const day = bytes[2];
     
@@ -198,18 +170,16 @@ export default function Home() {
   const handleScan = (data: string) => {
     const bytes = new Uint8Array(data.length);
     for (let i = 0; i < data.length; i++) {
-        bytes[i] = data.charCodeAt(i) & 0xFF;
+        bytes[i] = data.charCodeAt(i);
     }
     setScannedData(bytes);
     
-    // Intentamos decodificar, pero no nos preocupamos si falla
     try {
       const decoded = decodeQrData(bytes);
       setDecodedData(decoded);
     } catch (error) {
       console.error("Error decoding QR data:", error);
       setDecodedData(null);
-      // Mostramos el error en la consola pero no interrumpimos la experiencia del usuario
       toast({
         variant: "default",
         title: "Mostrando bytes sin decodificar",
@@ -221,7 +191,6 @@ export default function Home() {
   const byteArrayString = useMemo(() => {
     if (!scannedData) return "";
     try {
-      // Convert each byte to a zero-padded hex string with a "0x" prefix.
       const hexString = Array.from(scannedData)
         .map(byte => `0x${byte.toString(16).toUpperCase().padStart(2, '0')}`)
         .join(", ");
@@ -237,7 +206,6 @@ export default function Home() {
     }
   }, [scannedData, toast]);
   
-  // Formato alternativo para visualizar los bytes en formato tabla
   const byteArrayTable = useMemo(() => {
     if (!scannedData) return "";
     try {
@@ -245,11 +213,9 @@ export default function Home() {
       result += "-------|-------------------------------------------------|----------------\n";
       
       for (let i = 0; i < scannedData.length; i += 16) {
-        // Offset en hexadecimal
         const offset = i.toString(16).toUpperCase().padStart(6, '0');
         result += `${offset} | `;
         
-        // Bytes en hexadecimal
         const rowBytes = [];
         const rowAscii = [];
         
@@ -258,7 +224,6 @@ export default function Home() {
             const byte = scannedData[i + j];
             rowBytes.push(byte.toString(16).toUpperCase().padStart(2, '0'));
             
-            // Convertir a ASCII si es imprimible, o punto si no lo es
             if (byte >= 32 && byte <= 126) {
               rowAscii.push(String.fromCharCode(byte));
             } else {
@@ -284,7 +249,6 @@ export default function Home() {
     if (!decodedData) return "";
     try {
       return JSON.stringify(decodedData, (key, value) => {
-        // Excluir el campo rawBytes para evitar que el JSON sea demasiado grande
         if (key === 'rawBytes') return undefined;
         return value;
       }, 2);
