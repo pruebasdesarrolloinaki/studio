@@ -17,10 +17,9 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
   const animationFrameId = useRef<number>();
 
   const [error, setError] = useState<string | null>(null);
-  const [isScanning, setIsScanning] = useState(true);
+  const [isScanning, setIsScanning] = useState(false);
 
   const tick = useCallback(() => {
-    if (!isScanning) return;
     if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
       const canvas = canvasRef.current;
       const video = videoRef.current;
@@ -33,27 +32,25 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
           try {
             const imageData = canvasContext.getImageData(0, 0, canvas.width, canvas.height);
             const code = jsQR(imageData.data, imageData.width, imageData.height, {
-              inversionAttempts: "dontInvert",
+              inversionAttempts: "attemptBoth",
             });
 
             if (code && code.data) {
               onScan(code.data);
               setIsScanning(false);
-              return; // Stop ticking once a code is found
+              return; 
             }
           } catch(e) {
-            // This can happen due to security reasons on some browsers.
             console.error(e);
           }
         }
       }
     }
     animationFrameId.current = requestAnimationFrame(tick);
-  }, [isScanning, onScan]);
+  }, [onScan]);
 
-  const startScan = useCallback(async () => {
+  const startScanProcess = useCallback(async () => {
     setError(null);
-    setIsScanning(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
@@ -62,27 +59,39 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
         videoRef.current.srcObject = stream;
         videoRef.current.setAttribute("playsinline", "true");
         await videoRef.current.play();
-        animationFrameId.current = requestAnimationFrame(tick);
+        setIsScanning(true);
       }
     } catch (err) {
       console.error("Error accessing camera: ", err);
       setError("Could not access camera. Please grant permission and try again.");
     }
-  }, [tick]);
+  }, []);
 
   useEffect(() => {
-    startScan();
+    if (isScanning) {
+        animationFrameId.current = requestAnimationFrame(tick);
+    } else {
+        if (animationFrameId.current) {
+            cancelAnimationFrame(animationFrameId.current);
+        }
+    }
+    return () => {
+        if(animationFrameId.current) {
+            cancelAnimationFrame(animationFrameId.current);
+        }
+    }
+  }, [isScanning, tick]);
+
+  useEffect(() => {
+    startScanProcess();
 
     return () => {
-      if (animationFrameId.current) {
-        cancelAnimationFrame(animationFrameId.current);
-      }
       if (videoRef.current && videoRef.current.srcObject) {
         const stream = videoRef.current.srcObject as MediaStream;
         stream.getTracks().forEach((track) => track.stop());
       }
     };
-  }, [startScan]);
+  }, [startScanProcess]);
 
   return (
     <div className={cn("relative w-full aspect-square max-w-md mx-auto rounded-lg overflow-hidden border-2 border-dashed border-primary/50 bg-card flex items-center justify-center", className)}>
@@ -93,7 +102,7 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
           <VideoOff className="w-16 h-16 mb-4" />
           <p className="font-bold mb-2">Camera Error</p>
           <p className="text-sm text-muted-foreground">{error}</p>
-          <Button onClick={startScan} className="mt-4">Try Again</Button>
+          <Button onClick={startScanProcess} className="mt-4">Try Again</Button>
         </div>
       )}
       {isScanning && !error && (
