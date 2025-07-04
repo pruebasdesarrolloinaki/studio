@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { BrowserQRCodeReader, IScannerControls } from "@zxing/browser";
+import { NotFoundException, ChecksumException, FormatException } from "@zxing/library";
 import { QrCode, VideoOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -14,7 +15,6 @@ interface QrScannerProps {
 export function QrScanner({ onScan, className }: QrScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsRef = useRef<IScannerControls | null>(null);
-  // Use a ref for the code reader instance to prevent re-creation on re-renders
   const codeReaderRef = useRef(new BrowserQRCodeReader(undefined, {
       hints: {
         TRY_HARDER: true,
@@ -34,7 +34,7 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
   const startScan = useCallback(async () => {
     if (!videoRef.current) return;
     
-    stopScan(); // Ensure any previous scan is stopped before starting a new one
+    stopScan(); 
     setError(null);
     setScanComplete(false);
 
@@ -44,15 +44,18 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
           stopScan();
           setScanComplete(true);
           const rawBytes = result.getRawBytes();
-          if (rawBytes) {
+          if (rawBytes && rawBytes.length > 0) {
             onScan(rawBytes);
           }
         }
-        if (err && err.name !== 'NotFoundException') {
-            console.error("QR Scan Error:", err);
-            setError("An error occurred during scanning. Please try again.");
-            setScanComplete(true);
-            stopScan();
+        
+        // We deliberately ignore common scanning errors (NotFound, Checksum, Format)
+        // as the scanner will just try again on the next frame. This makes the scanner more resilient.
+        if (err && !(err instanceof NotFoundException || err instanceof ChecksumException || err instanceof FormatException)) {
+          console.error("An unexpected QR Scan Error occurred:", err);
+          setError("An unexpected error occurred during scanning.");
+          setScanComplete(true);
+          stopScan();
         }
       });
       controlsRef.current = newControls;
@@ -63,7 +66,7 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
       } else {
         setError("Could not access camera. It might be in use by another application or not available.");
       }
-      setScanComplete(true); // Stop showing scanning UI on error
+      setScanComplete(true);
     }
   }, [onScan, stopScan]);
 
