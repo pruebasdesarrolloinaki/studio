@@ -40,19 +40,18 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
 
     const callback = (result: Result | undefined, err: Exception | undefined) => {
         if (result) {
-          stopScan();
-          setScanComplete(true);
           const rawBytes = result.getRawBytes();
           if (rawBytes && rawBytes.length > 0) {
+            stopScan();
+            setScanComplete(true);
             onScan(rawBytes);
           }
         }
         
         if (err && !(err instanceof NotFoundException || err instanceof ChecksumException || err instanceof FormatException)) {
           console.error("An unexpected QR Scan Error occurred:", err);
-          setError("An unexpected error occurred during scanning.");
-          setScanComplete(true);
-          stopScan();
+          // We don't show an error to the user for intermittent scan failures, to avoid being disruptive.
+          // The scanner will just keep trying on the next frame.
         }
     };
 
@@ -86,7 +85,7 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
         if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
           setError("Camera permission was denied. Please grant permission in your browser settings and try again.");
         } else {
-          setError("Could not access camera. It might be in use by another application or not available.");
+          setError("Could not access camera. It might be in use, unavailable, or blocked by your browser on non-secure (HTTP) pages. Please try using HTTPS or localhost.");
         }
         setScanComplete(true);
       }
