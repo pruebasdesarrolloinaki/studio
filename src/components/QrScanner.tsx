@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import jsQR from "jsqr";
+import { BrowserQRCodeReader, IScannerControls } from "@zxing/browser";
 import { QrCode, VideoOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -13,109 +13,97 @@ interface QrScannerProps {
 
 export function QrScanner({ onScan, className }: QrScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animationFrameId = useRef<number>();
+  const controlsRef = useRef<IScannerControls | null>(null);
+  // Use a ref for the code reader instance to prevent re-creation on re-renders
+  const codeReaderRef = useRef(new BrowserQRCodeReader(undefined, {
+      hints: {
+        TRY_HARDER: true,
+      },
+  }));
 
   const [error, setError] = useState<string | null>(null);
-  const [isScanning, setIsScanning] = useState(false);
+  const [scanComplete, setScanComplete] = useState(false);
 
-  const tick = useCallback(() => {
-    if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
-      const canvas = canvasRef.current;
-      const video = videoRef.current;
-      if (canvas && video) {
-        const canvasContext = canvas.getContext("2d", { willReadFrequently: true });
-        if (canvasContext) {
-          canvas.height = video.videoHeight;
-          canvas.width = video.videoWidth;
-          canvasContext.drawImage(video, 0, 0, canvas.width, canvas.height);
-          try {
-            const imageData = canvasContext.getImageData(0, 0, canvas.width, canvas.height);
-            // Reverted to basic jsQR call for debugging non-standard content
-            const code = jsQR(imageData.data, imageData.width, imageData.height);
-
-            if (code && code.binaryData.length > 0) {
-              onScan(new Uint8Array(code.binaryData));
-              setIsScanning(false);
-              return; 
-            }
-          } catch(e) {
-            console.error("Error during QR scan processing:", e);
-          }
-        }
-      }
-    }
-    animationFrameId.current = requestAnimationFrame(tick);
-  }, [onScan]);
-
-  const startScanProcess = useCallback(async () => {
-    setError(null);
-    try {
-      // Using basic camera constraints for debugging
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-      });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.setAttribute("playsinline", "true");
-        await videoRef.current.play();
-        setIsScanning(true);
-      }
-    } catch (err) {
-      console.error("Camera access failed: ", err);
-      setError("Could not access camera. Please grant permission and try again.");
+  const stopScan = useCallback(() => {
+    if (controlsRef.current) {
+      controlsRef.current.stop();
+      controlsRef.current = null;
     }
   }, []);
 
-  useEffect(() => {
-    if (isScanning) {
-        animationFrameId.current = requestAnimationFrame(tick);
-    } else {
-        if (animationFrameId.current) {
-            cancelAnimationFrame(animationFrameId.current);
-        }
-    }
-    return () => {
-        if(animationFrameId.current) {
-            cancelAnimationFrame(animationFrameId.current);
-        }
-    }
-  }, [isScanning, tick]);
+  const startScan = useCallback(async () => {
+    if (!videoRef.current) return;
+    
+    stopScan(); // Ensure any previous scan is stopped before starting a new one
+    setError(null);
+    setScanComplete(false);
 
-  useEffect(() => {
-    startScanProcess();
-
-    return () => {
-      if (videoRef.current && videoRef.current.srcObject) {
-        const stream = videoRef.current.srcObject as MediaStream;
-        stream.getTracks().forEach((track) => track.stop());
+    try {
+      const newControls = await codeReaderRef.current.decodeFromVideoDevice(undefined, videoRef.current, (result, err) => {
+        if (result) {
+          stopScan();
+          setScanComplete(true);
+          const rawBytes = result.getRawBytes();
+          if (rawBytes) {
+            onScan(rawBytes);
+          }
+        }
+        if (err && err.name !== 'NotFoundException') {
+            console.error("QR Scan Error:", err);
+            setError("An error occurred during scanning. Please try again.");
+            setScanComplete(true);
+            stopScan();
+        }
+      });
+      controlsRef.current = newControls;
+    } catch (err: any) {
+      console.error("Camera access failed: ", err);
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        setError("Camera permission was denied. Please grant permission in your browser settings and try again.");
+      } else {
+        setError("Could not access camera. It might be in use by another application or not available.");
       }
+      setScanComplete(true); // Stop showing scanning UI on error
+    }
+  }, [onScan, stopScan]);
+
+
+  useEffect(() => {
+    startScan();
+    return () => {
+      stopScan();
     };
-  }, [startScanProcess]);
+  }, [startScan, stopScan]);
+
+  const handleRescan = () => {
+    startScan();
+  }
 
   return (
     <div className={cn("relative w-full aspect-square max-w-md mx-auto rounded-lg overflow-hidden border-2 border-dashed border-primary/50 bg-card flex items-center justify-center", className)}>
-      <video ref={videoRef} className={cn("w-full h-full object-cover", { "hidden": !isScanning && !error })} />
-      <canvas ref={canvasRef} className="hidden" />
+      <video ref={videoRef} className={cn("w-full h-full object-cover", { "hidden": !!error })} />
+      
       {error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center text-destructive bg-background">
           <VideoOff className="w-16 h-16 mb-4" />
           <p className="font-bold mb-2">Camera Error</p>
           <p className="text-sm text-muted-foreground">{error}</p>
-          <Button onClick={startScanProcess} className="mt-4">Try Again</Button>
+          <Button onClick={handleRescan} className="mt-4">Try Again</Button>
         </div>
       )}
-      {isScanning && !error && (
+
+      {!scanComplete && !error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 pointer-events-none">
           <div className="w-2/3 h-2/3 border-4 border-accent rounded-lg opacity-75 animate-pulse" />
           <p className="mt-4 text-primary-foreground font-semibold">Scanning for QR Code...</p>
         </div>
       )}
-       {!isScanning && !error && (
+
+       {scanComplete && !error && (
          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80">
            <QrCode className="w-24 h-24 text-accent" />
            <p className="mt-4 text-lg font-bold text-primary-foreground">Scan Complete!</p>
-           <Button variant="link" onClick={() => setIsScanning(true)} className="mt-2 text-primary">Scan another code</Button>
+           <Button variant="link" onClick={handleRescan} className="mt-2 text-primary">Scan another code</Button>
          </div>
        )}
     </div>
