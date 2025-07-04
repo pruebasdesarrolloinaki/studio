@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { QrCode, VideoOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -16,56 +16,14 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
   const [scanComplete, setScanComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [result, setResult] = useState<string | null>(null);
-  
-  // Función para convertir una cadena hexadecimal a Uint8Array
-  const hexStringToUint8Array = useCallback((hexString: string): Uint8Array => {
-    // Eliminar espacios y asegurarse de que la longitud sea par
-    const cleanHexString = hexString.replace(/\s/g, '');
-    if (cleanHexString.length % 2 !== 0) {
-      throw new Error('La cadena hexadecimal debe tener una longitud par');
-    }
-    
-    const byteArray = new Uint8Array(cleanHexString.length / 2);
-    for (let i = 0; i < cleanHexString.length; i += 2) {
-      byteArray[i / 2] = parseInt(cleanHexString.substring(i, i + 2), 16);
-    }
-    
-    return byteArray;
-  }, []);
-  
-  // Función para intentar convertir el resultado del escaneo a Uint8Array
-  const processQrResult = useCallback((text: string) => {
-    try {
-      // Intentar interpretar como datos binarios (representados en hexadecimal)
-      if (/^[0-9A-Fa-f\s]+$/.test(text)) {
-        // Es una cadena hexadecimal
-        const binaryData = hexStringToUint8Array(text);
-        onScan(binaryData);
-        return true;
-      } else {
-        // Intentar convertir directamente a Uint8Array (cada carácter como un byte)
-        const binaryData = new Uint8Array(text.length);
-        for (let i = 0; i < text.length; i++) {
-          binaryData[i] = text.charCodeAt(i);
-        }
-        onScan(binaryData);
-        return true;
-      }
-    } catch (err) {
-      console.error("Error processing QR code data:", err);
-      return false;
-    }
-  }, [hexStringToUint8Array, onScan]);
 
-  // Configurar el escáner ZXing
   const { ref, torch } = useZxing({
     onDecodeResult(result) {
-      const text = result.getText();
-      setResult(text);
-      console.log("QR Code detected!", text);
-      
-      // Procesar el resultado y convertirlo a Uint8Array
-      if (processQrResult(text)) {
+      const rawBytes = result.getRawBytes();
+      if (rawBytes) {
+        setResult(result.getText()); // Store text representation for potential display
+        console.log("QR Code detected! Raw bytes length:", rawBytes.length);
+        onScan(rawBytes);
         setScanComplete(true);
       }
     },
@@ -89,9 +47,7 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
     timeBetweenDecodingAttempts: 300
   });
 
-  // Efecto para manejar el estado de carga
   useEffect(() => {
-    // Simular un breve tiempo de carga para la inicialización
     const timer = setTimeout(() => {
       setIsLoading(false);
     }, 1000);
@@ -107,13 +63,12 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
 
   return (
     <div className={cn("relative w-full aspect-square max-w-md mx-auto rounded-lg overflow-hidden border-2 border-dashed border-primary/50 bg-card flex items-center justify-center", className)}>
-      {/* Contenedor para la cámara */}
       <video ref={ref} className="w-full h-full object-cover" />
       
       {isLoading && (
         <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-card/90 text-center">
           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary mb-4"></div>
-          <p className="text-primary font-medium">Inicializando escáner...</p>
+          <p className="text-primary font-medium">Initializing scanner...</p>
         </div>
       )}
       
@@ -141,7 +96,6 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
         </div>
       )}
       
-      {/* Control de linterna si está disponible */}
       {torch.isAvailable && !scanComplete && !error && !isLoading && (
         <Button 
           variant="outline" 
