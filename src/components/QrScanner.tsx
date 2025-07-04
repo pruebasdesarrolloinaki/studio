@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { useZxing } from "react-zxing";
 
 interface QrScannerProps {
-  onScan: (data: Uint8Array) => void;
+  onScan: (data: string) => void;
   className?: string;
 }
 
@@ -15,17 +15,11 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
   const [error, setError] = useState<string | null>(null);
   const [scanComplete, setScanComplete] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [result, setResult] = useState<string | null>(null);
 
   const { ref, torch } = useZxing({
     onDecodeResult(result) {
-      const rawBytes = result.getRawBytes();
-      if (rawBytes) {
-        setResult(result.getText()); // Store text representation for potential display
-        console.log("QR Code detected! Raw bytes length:", rawBytes.length);
-        onScan(rawBytes);
-        setScanComplete(true);
-      }
+      onScan(result.getText());
+      setScanComplete(true);
     },
     onError(error) {
       console.error("ZXing error:", error);
@@ -57,7 +51,6 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
 
   const handleRescan = () => {
     setScanComplete(false);
-    setResult(null);
     setError(null);
   };
 

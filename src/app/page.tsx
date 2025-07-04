@@ -195,15 +195,16 @@ export default function Home() {
     return `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
   };
 
-  const handleScan = (data: Uint8Array) => {
-    setScannedData(data);
-    // Siempre guardamos los bytes crudos
-    console.log("Scanned QR data length:", data.length);
-    console.log("First 10 bytes:", Array.from(data.slice(0, 10)).map(b => `0x${b.toString(16).padStart(2, '0')}`));
+  const handleScan = (data: string) => {
+    const bytes = new Uint8Array(data.length);
+    for (let i = 0; i < data.length; i++) {
+        bytes[i] = data.charCodeAt(i) & 0xFF;
+    }
+    setScannedData(bytes);
     
     // Intentamos decodificar, pero no nos preocupamos si falla
     try {
-      const decoded = decodeQrData(data);
+      const decoded = decodeQrData(bytes);
       setDecodedData(decoded);
     } catch (error) {
       console.error("Error decoding QR data:", error);
