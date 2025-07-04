@@ -20,8 +20,11 @@ export default function Home() {
   const byteArrayString = useMemo(() => {
     if (!scannedData) return "";
     try {
-      // The data is already a Uint8Array, we just need to format it for display.
-      return `[${Array.from(scannedData).join(", ")}]`;
+      // Convert each byte to a zero-padded hex string with a "0x" prefix.
+      const hexString = Array.from(scannedData)
+        .map(byte => `0x${byte.toString(16).toUpperCase().padStart(2, '0')}`)
+        .join(", ");
+      return `[${hexString}]`;
     } catch (error) {
       console.error("Error converting to byte array string:", error);
       toast({
