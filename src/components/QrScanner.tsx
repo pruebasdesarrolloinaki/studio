@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { BrowserQRCodeReader, IScannerControls } from "@zxing/browser";
-import { NotFoundException, ChecksumException, FormatException } from "@zxing/library";
+import { NotFoundException, ChecksumException, FormatException, Result, Exception } from "@zxing/library";
 import { QrCode, VideoOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -38,8 +38,7 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
     setError(null);
     setScanComplete(false);
 
-    try {
-      const newControls = await codeReaderRef.current.decodeFromVideoDevice(undefined, videoRef.current, (result, err) => {
+    const callback = (result: Result | undefined, err: Exception | undefined) => {
         if (result) {
           stopScan();
           setScanComplete(true);
@@ -49,24 +48,48 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
           }
         }
         
-        // We deliberately ignore common scanning errors (NotFound, Checksum, Format)
-        // as the scanner will just try again on the next frame. This makes the scanner more resilient.
         if (err && !(err instanceof NotFoundException || err instanceof ChecksumException || err instanceof FormatException)) {
           console.error("An unexpected QR Scan Error occurred:", err);
           setError("An unexpected error occurred during scanning.");
           setScanComplete(true);
           stopScan();
         }
-      });
-      controlsRef.current = newControls;
-    } catch (err: any) {
-      console.error("Camera access failed: ", err);
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        setError("Camera permission was denied. Please grant permission in your browser settings and try again.");
-      } else {
-        setError("Could not access camera. It might be in use by another application or not available.");
+    };
+
+    try {
+      // Try with high-res constraints first for better dense QR code scanning
+      const constraints: MediaStreamConstraints = {
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: 'environment', // prefer back camera
+        },
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      
+      if(videoRef.current) {
+        videoRef.current.srcObject = stream;
+        // The decodeFromStream method is more flexible and allows us to use custom stream constraints.
+        const newControls = await codeReaderRef.current.decodeFromStream(stream, videoRef.current, callback);
+        controlsRef.current = newControls;
       }
-      setScanComplete(true);
+
+    } catch (highResError) {
+      console.warn("High-resolution stream failed, falling back to default.", highResError);
+      // Fallback to default camera settings if high-res fails
+      try {
+        const newControls = await codeReaderRef.current.decodeFromVideoDevice(undefined, videoRef.current, callback);
+        controlsRef.current = newControls;
+      } catch (err: any) {
+        console.error("Camera access failed: ", err);
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          setError("Camera permission was denied. Please grant permission in your browser settings and try again.");
+        } else {
+          setError("Could not access camera. It might be in use by another application or not available.");
+        }
+        setScanComplete(true);
+      }
     }
   }, [onScan, stopScan]);
 
@@ -84,7 +107,7 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
 
   return (
     <div className={cn("relative w-full aspect-square max-w-md mx-auto rounded-lg overflow-hidden border-2 border-dashed border-primary/50 bg-card flex items-center justify-center", className)}>
-      <video ref={videoRef} className={cn("w-full h-full object-cover", { "hidden": !!error })} />
+      <video ref={videoRef} className={cn("w-full h-full object-cover", { "hidden": !!error })} autoPlay muted playsInline />
       
       {error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center text-destructive bg-background">
