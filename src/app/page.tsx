@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useMemo } from "react";
@@ -25,11 +26,7 @@ interface DecodedQrData {
     magicConstant: number;
     version: number;
     country: string;
-    signerId: {
-      country: string;
-      entity: string;
-      certRef: string;
-    };
+    signerAndCertRef: string;
     issueDate: string;
     signDate: string;
     docType: number;
@@ -52,55 +49,46 @@ export default function Home() {
 
   const decodeQrData = (data: Uint8Array): DecodedQrData | null => {
     try {
-      if (data.length < 12) {
-        throw new Error("QR data too short to be a valid ICAO 9303 SDV format");
+      // Per ICAO 9303-13 spec, header is fixed size
+      const HEADER_SIZE = 18;
+      if (data.length < HEADER_SIZE) {
+        throw new Error("QR data too short for a valid ICAO 9303 header.");
       }
 
       let offset = 0;
-      
+
+      // --- HEADER PARSING (18 bytes) ---
       const magicConstant = data[offset++];
       const version = data[offset++];
-      const countryCode = String.fromCharCode(data[offset++], data[offset++]);
+      const country = String.fromCharCode(data[offset++], data[offset++]);
       
-      const signerCountry = String.fromCharCode(data[offset++], data[offset++]);
-      const signerEntity = String.fromCharCode(data[offset++], data[offset++]);
-      const certRefSizeStr = String.fromCharCode(data[offset++], data[offset++]);
-      const certRefSize = parseInt(certRefSizeStr, 10);
+      const signerAndCertRefBytes = data.slice(offset, offset + 6);
+      const signerAndCertRef = Array.from(signerAndCertRefBytes)
+          .map(b => b.toString(16).padStart(2, '0').toUpperCase())
+          .join('');
+      offset += 6;
 
-      if (isNaN(certRefSize) || offset + certRefSize > data.length) {
-        throw new Error("Invalid or incomplete certificate reference data.");
-      }
-
-      let certRefHex = "";
-      for (let i = 0; i < certRefSize; i++) {
-        certRefHex += data[offset++].toString(16).padStart(2, '0').toUpperCase();
-      }
-      
       const issueDate = formatDate(data.slice(offset, offset + 3));
       offset += 3;
-      
+
       const signDate = formatDate(data.slice(offset, offset + 3));
       offset += 3;
-      
-      const docType = data[offset++];
-      
-      const docCategory = data[offset++];
-      
+
+      const docType = data[offset++]; // Feature Reference in spec image
+      const docCategory = data[offset++]; // Document Type in spec image
+
       const header = {
         magicConstant,
         version,
-        country: countryCode,
-        signerId: {
-            country: signerCountry,
-            entity: signerEntity,
-            certRef: certRefHex
-        },
+        country,
+        signerAndCertRef,
         issueDate,
         signDate,
         docType,
         docCategory
       };
       
+      // --- TLV (Tag-Length-Value) PARSING ---
       const textDecoder = new TextDecoder('utf-8');
       const allTlvItems: Array<{ tag: number; length: number; value: Uint8Array }> = [];
 
@@ -110,9 +98,9 @@ export default function Home() {
 
           let length = 0;
           const firstLengthByte = data[offset++];
-          if (firstLengthByte < 0x80) {
+          if (firstLengthByte < 0x80) { // Short form (length < 128)
               length = firstLengthByte;
-          } else {
+          } else { // Long form
               const numLengthBytes = firstLengthByte & 0x7F;
               if (offset + numLengthBytes > data.length) break;
               for (let i = 0; i < numLengthBytes; i++) {
@@ -126,10 +114,11 @@ export default function Home() {
           allTlvItems.push({ tag, length, value: valueBytes });
           offset += length;
       }
-
+      
       const payload: DecodedPayload = {};
       let signature;
 
+      // Per spec, the last TLV block is the signature
       if (allTlvItems.length > 0) {
           const signatureItem = allTlvItems.pop()!;
           const valueHex = Array.from(signatureItem.value)
@@ -137,7 +126,8 @@ export default function Home() {
               .join('');
           signature = { tag: signatureItem.tag, length: signatureItem.length, value: valueHex };
       }
-
+      
+      // Process the rest of the items as the message payload
       allTlvItems.forEach(item => {
           switch (item.tag) {
               case 0x40: payload.documentNumber = textDecoder.decode(item.value); break;
@@ -150,7 +140,7 @@ export default function Home() {
               default:
                   const valueHex = Array.from(item.value).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join('');
                   if (!payload.unknown) payload.unknown = [];
-                  payload.unknown.push({ tag: `0x${item.tag.toString(16)}`, length: item.length, value: valueHex });
+                  payload.unknown.push({ tag: `0x${item.tag.toString(16).toUpperCase()}`, length: item.length, value: valueHex });
                   break;
           }
       });
@@ -183,24 +173,15 @@ export default function Home() {
   };
 
   const handleScan = (data: string) => {
+    // Directly convert char codes to bytes, preserving raw data
     const bytes = new Uint8Array(data.length);
     for (let i = 0; i < data.length; i++) {
         bytes[i] = data.charCodeAt(i);
     }
     setScannedData(bytes);
     
-    try {
-      const decoded = decodeQrData(bytes);
-      setDecodedData(decoded);
-    } catch (error) {
-      console.error("Error decoding QR data:", error);
-      setDecodedData(null);
-      toast({
-        variant: "default",
-        title: "Showing raw bytes",
-        description: "Data does not follow expected format, but you can see the raw bytes.",
-      });
-    }
+    const decoded = decodeQrData(bytes);
+    setDecodedData(decoded);
   };
 
   const byteArrayString = useMemo(() => {
@@ -343,18 +324,17 @@ export default function Home() {
                       <div>
                         <div className="flex items-center gap-2 text-primary font-semibold mb-2">
                           <FileText className="w-4 h-4" />
-                          <span>Información del Sello Digital (Cabecera)</span>
+                          <span>Información de la Cabecera (Header)</span>
                         </div>
                         <div className="grid grid-cols-2 gap-x-4 gap-y-2">
                           <div><span className="text-muted-foreground">Magic:</span> <code>0x{decodedData.header.magicConstant.toString(16).toUpperCase()}</code></div>
                           <div><span className="text-muted-foreground">Versión:</span> <code>{decodedData.header.version}</code></div>
                           <div><span className="text-muted-foreground">País Emisor:</span> <code>{decodedData.header.country}</code></div>
-                          <div><span className="text-muted-foreground">ID Firmante:</span> <code>{`${decodedData.header.signerId.country}${decodedData.header.signerId.entity}`}</code></div>
-                          <div className="col-span-2"><span className="text-muted-foreground">Ref. Certificado:</span> <code className="break-all text-xs">{decodedData.header.signerId.certRef}</code></div>
+                          <div className="col-span-2"><span className="text-muted-foreground">Firmante y Ref. Cert.:</span> <code className="break-all text-xs">{decodedData.header.signerAndCertRef}</code></div>
                           <div><span className="text-muted-foreground">Fecha Emisión:</span> <code>{decodedData.header.issueDate}</code></div>
                           <div><span className="text-muted-foreground">Fecha Firma:</span> <code>{decodedData.header.signDate}</code></div>
-                          <div><span className="text-muted-foreground">Tipo Doc:</span> <code>{decodedData.header.docType}</code></div>
-                          <div><span className="text-muted-foreground">Categoría Doc:</span> <code>{decodedData.header.docCategory}</code></div>
+                          <div><span className="text-muted-foreground">Ref. Característica:</span> <code>{decodedData.header.docType}</code></div>
+                          <div><span className="text-muted-foreground">Tipo Doc:</span> <code>{decodedData.header.docCategory}</code></div>
                         </div>
                       </div>
 
