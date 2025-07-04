@@ -14,7 +14,11 @@ interface DecodedQrData {
     magicConstant: number;
     version: number;
     country: string;
-    signerId: string;
+    signerId: {
+      country: string;
+      entity: string;
+      certRef: string;
+    };
     issueDate: string;
     signDate: string;
     docType: number;
@@ -48,34 +52,22 @@ export default function Home() {
       let offset = 0;
       
       const magicConstant = data[offset++];
-      console.log(`Magic constant found: 0x${magicConstant.toString(16).toUpperCase()}`);
-      
-      const isICAO9303 = magicConstant === 0xDC;
-      const isAlternateFormat = magicConstant === 0x40;
-      
-      console.log(`Is ICAO 9303 format: ${isICAO9303}`);
-      console.log(`Is alternate format (0x40): ${isAlternateFormat}`);
-      
       const version = data[offset++];
-      console.log(`Version found: 0x${version.toString(16).toUpperCase()}`);
-      
       const countryCode = String.fromCharCode(data[offset++], data[offset++]);
       
-      let signerIdStr = "";
-      
-      signerIdStr += String.fromCharCode(data[offset++], data[offset++]);
-      
-      signerIdStr += String.fromCharCode(data[offset++], data[offset++]);
-      
+      const signerCountry = String.fromCharCode(data[offset++], data[offset++]);
+      const signerEntity = String.fromCharCode(data[offset++], data[offset++]);
       const certRefSizeStr = String.fromCharCode(data[offset++], data[offset++]);
       const certRefSize = parseInt(certRefSizeStr, 10);
-      signerIdStr += certRefSizeStr;
-      
+
+      if (isNaN(certRefSize) || offset + certRefSize > data.length) {
+        throw new Error("Invalid or incomplete certificate reference data.");
+      }
+
       let certRefHex = "";
       for (let i = 0; i < certRefSize; i++) {
         certRefHex += data[offset++].toString(16).padStart(2, '0').toUpperCase();
       }
-      signerIdStr += certRefHex;
       
       const issueDate = formatDate(data.slice(offset, offset + 3));
       offset += 3;
@@ -91,7 +83,11 @@ export default function Home() {
         magicConstant,
         version,
         country: countryCode,
-        signerId: signerIdStr,
+        signerId: {
+            country: signerCountry,
+            entity: signerEntity,
+            certRef: certRefHex
+        },
         issueDate,
         signDate,
         docType,
@@ -104,24 +100,19 @@ export default function Home() {
       while (offset < data.length) {
         const tag = data[offset++];
         
+        if (offset >= data.length) break;
+
         let length = 0;
-        if (version === 0x03) { 
-          if (offset >= data.length) break;
-          
-          const firstLengthByte = data[offset++];
-          if (firstLengthByte < 0x80) {
-            length = firstLengthByte;
-          } else {
-            const numLengthBytes = firstLengthByte & 0x7F;
-            length = 0;
-            for (let i = 0; i < numLengthBytes; i++) {
-              if (offset >= data.length) break;
-              length = (length << 8) | data[offset++];
-            }
-          }
+        const firstLengthByte = data[offset++];
+        if (firstLengthByte < 0x80) {
+          length = firstLengthByte;
         } else {
-          if (offset >= data.length) break;
-          length = data[offset++];
+          const numLengthBytes = firstLengthByte & 0x7F;
+          if (offset + numLengthBytes > data.length) break;
+          length = 0;
+          for (let i = 0; i < numLengthBytes; i++) {
+            length = (length << 8) | data[offset++];
+          }
         }
         
         if (offset + length > data.length) break;
@@ -301,7 +292,7 @@ export default function Home() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Tabs defaultValue="raw" className="w-full">
+              <Tabs defaultValue="decoded" className="w-full">
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="decoded">Decoded Structure</TabsTrigger>
                   <TabsTrigger value="raw">Raw Bytes</TabsTrigger>
@@ -344,7 +335,11 @@ export default function Home() {
                         </div>
                         <div>
                           <span className="text-muted-foreground">ID Firmante:</span>{" "}
-                          <code>{decodedData.header.signerId}</code>
+                          <code>{`${decodedData.header.signerId.country}${decodedData.header.signerId.entity}`}</code>
+                        </div>
+                        <div className="col-span-2">
+                          <span className="text-muted-foreground">Ref. Certificado:</span>{" "}
+                          <code className="break-all text-xs">{decodedData.header.signerId.certRef}</code>
                         </div>
                         <div>
                           <span className="text-muted-foreground">Fecha Emisión:</span>{" "}
