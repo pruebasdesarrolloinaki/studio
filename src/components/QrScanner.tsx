@@ -27,10 +27,11 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
     },
     onError(error) {
       console.error("ZXing error:", error);
-      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+      const errorObj = error as Error;
+      if (errorObj.name === 'NotAllowedError' || errorObj.name === 'PermissionDeniedError') {
         setError("Camera permission was denied. Please grant permission in your browser settings and try again.");
       } else {
-        setError(`Could not access camera: ${error.message || error}`);
+        setError(`Could not access camera: ${errorObj.message || errorObj}`);
       }
     },
     paused: scanComplete,
@@ -60,7 +61,7 @@ export function QrScanner({ onScan, className }: QrScannerProps) {
 
   return (
     <div className={cn("relative w-full aspect-square max-w-md mx-auto rounded-lg overflow-hidden border-2 border-dashed border-primary/50 bg-card flex items-center justify-center", className)}>
-      <video ref={ref} className="w-full h-full object-cover" />
+      <video ref={ref as React.RefObject<HTMLVideoElement>} className="w-full h-full object-cover" />
       
       {isLoading && (
         <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-card/90 text-center">
